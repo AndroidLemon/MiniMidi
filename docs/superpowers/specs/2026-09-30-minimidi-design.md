@@ -74,7 +74,7 @@ Avoid: gradients, glassmorphism, soft cards with drop shadows, default system/In
 ### Visual direction — C · Rhythm
 - Near-black body (`#111`), cream text (`#e9e4d8`).
 - Pads colour-grouped by row, Push-style: row 1 (bottom) red `#c8321f`, row 2 orange `#e2701f`, row 3 yellow `#e9c22c`, row 4 cream `#e9e4d8`.
-- Pad number top-left, short instrument label bottom-right (BD, BD2, SD, CP / RS, LT, CH, MT / OH, HT, CY, RD / P1, P2, P3, FX), in a condensed sans (Archivo Narrow); wordmark in heavy italic (Archivo).
+- Pad number top-left, short instrument label bottom-right, in a condensed sans (Archivo Narrow); wordmark in heavy italic (Archivo). Labels follow the General MIDI drum map for notes 36–51 so the pad says what Logic plays: BD, RS, SD, CP / SD2, FT, CH, FT2 / PH, LT, OH, MT / MT2, CY, HT, RD. (The brainstorm mockups used placeholder labels; these supersede them.)
 - Lit pad: brighter + saturated, with a thin inset highlight. Tight ~4–6 dp gutters, small corner radius (~3 dp).
 - Pad order runs bottom-left (pad 1) to top-right (pad 16), MPC style.
 - Reference mockups: `.superpowers/brainstorm/*/content/visual-direction.html`, `cover-layout.html`.
