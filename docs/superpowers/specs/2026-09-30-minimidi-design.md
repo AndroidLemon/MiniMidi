@@ -56,6 +56,7 @@ Android note: in USB MIDI mode the host connection appears to the app as a MIDI 
 - A pad fires only where a finger lands. Sliding onto another pad does not trigger it.
 - Each pointer is independent; two fingers on one pad retrigger it.
 - Velocity is clamped to **1–127** (a note-on with velocity 0 is a note-off in MIDI).
+- Real contact readings map to **20–127**: velocity 1 is near-silent in drum samplers, so the softest touch plays at a floor (tuned in the feel check). Contact readings ≤ 1 dp count as "no reading" and use the fixed-velocity value.
 
 ## Feel & UX
 
