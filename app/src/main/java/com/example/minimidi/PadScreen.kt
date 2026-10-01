@@ -145,6 +145,8 @@ private fun PadGrid(
                 if (!currentEnabled) return@pointerInteropFilter false
                 when (e.actionMasked) {
                     MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                        // A fresh gesture means no finger is down: drop stale state (missed UP, onPause panic).
+                        if (e.actionMasked == MotionEvent.ACTION_DOWN) releaseAll()
                         val i = e.actionIndex
                         val pad = hitTest(e.getX(i), e.getY(i), size.width.toFloat(), size.height.toFloat(), currentLayout)
                         if (pad != null) {
