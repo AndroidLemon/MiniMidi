@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -19,9 +20,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.systemGestureExclusion
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,12 +49,15 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 
 private val PadShape = RoundedCornerShape(3.dp)
 
@@ -67,6 +77,11 @@ fun PadScreen(
             StatusBar(connected)
             PadGrid(layout, settings, engine, haptics, enabled = !panelOpen, modifier = Modifier.weight(1f))
             SettingsStrip(settings, onClick = { panelOpen = true })
+        }
+        if (panelOpen) {
+            // Scrim: tapping outside closes the panel and swallows the touch so nothing underneath fires.
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)).clickable(interactionSource = null, indication = null) { panelOpen = false })
+            SettingsPanel(settings, onSettingsChange, onDone = { panelOpen = false }, Modifier.align(Alignment.BottomCenter))
         }
     }
 }
@@ -198,12 +213,97 @@ private fun PadCell(index: Int, level: State<Float?>, modifier: Modifier) {
 @Composable
 private fun SettingsStrip(settings: Settings, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 4.dp),
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(interactionSource = null, indication = null, onClickLabel = "Open settings", onClick = onClick)
+            .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val mode = if (settings.fixedVelocity) "Velocity: Fixed ${settings.fixedValue}" else "Velocity: Area"
         Text(mode.uppercase(), style = Rhythm.label(Rhythm.Ink))
         Spacer(Modifier.weight(1f))
         Text("SENS ${settings.sensitivity}", style = Rhythm.label(Rhythm.Ink))
+    }
+}
+
+@Composable
+private fun SettingsPanel(settings: Settings, onChange: (Settings) -> Unit, onDone: () -> Unit, modifier: Modifier) {
+    val sliderColors = SliderDefaults.colors(
+        thumbColor = Rhythm.Ink,
+        activeTrackColor = Rhythm.Led,
+        inactiveTrackColor = Rhythm.Ink.copy(alpha = 0.2f),
+        activeTickColor = Color.Transparent,
+        inactiveTickColor = Color.Transparent,
+    )
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(Rhythm.Panel)
+            .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        SettingLabel("Sensitivity ${settings.sensitivity}")
+        Slider(
+            value = settings.sensitivity.toFloat(),
+            onValueChange = { onChange(settings.copy(sensitivity = it.roundToInt())) },
+            valueRange = SENSITIVITY_MIN.toFloat()..SENSITIVITY_MAX.toFloat(),
+            steps = SENSITIVITY_MAX - SENSITIVITY_MIN - 1,
+            colors = sliderColors,
+            modifier = Modifier.semantics { contentDescription = "Sensitivity" },
+        )
+        SettingSwitch("Fixed velocity", settings.fixedVelocity) { onChange(settings.copy(fixedVelocity = it)) }
+        if (settings.fixedVelocity) {
+            SettingLabel("Level ${settings.fixedValue}")
+            Slider(
+                value = settings.fixedValue.toFloat(),
+                onValueChange = { onChange(settings.copy(fixedValue = it.roundToInt().coerceIn(1, 127))) },
+                valueRange = 1f..127f,
+                colors = sliderColors,
+                modifier = Modifier.semantics { contentDescription = "Fixed velocity level" },
+            )
+        }
+        SettingSwitch("Haptics", settings.haptics) { onChange(settings.copy(haptics = it)) }
+        SettingSwitch("Big pads when folded", settings.bigPadsWhenFolded) { onChange(settings.copy(bigPadsWhenFolded = it)) }
+        Text(
+            "DONE",
+            style = Rhythm.label(Rhythm.Led),
+            modifier = Modifier
+                .align(Alignment.End)
+                .heightIn(min = 48.dp)
+                .clickable(interactionSource = null, indication = null, onClick = onDone)
+                .padding(horizontal = 8.dp, vertical = 16.dp),
+        )
+    }
+}
+
+@Composable
+private fun SettingLabel(text: String) =
+    Text(text.uppercase(), style = Rhythm.label(Rhythm.Ink), modifier = Modifier.padding(top = 8.dp))
+
+@Composable
+private fun SettingSwitch(text: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(interactionSource = null, indication = null) { onChange(!checked) }
+            .semantics(mergeDescendants = true) { role = Role.Switch; contentDescription = text },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text.uppercase(), style = Rhythm.label(Rhythm.Ink))
+        Spacer(Modifier.weight(1f))
+        Switch(
+            checked = checked,
+            onCheckedChange = null, // the whole row is the target
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Rhythm.Ink,
+                checkedTrackColor = Rhythm.Led,
+                uncheckedThumbColor = Rhythm.Ink.copy(alpha = 0.6f),
+                uncheckedTrackColor = Rhythm.Body,
+                uncheckedBorderColor = Rhythm.Ink.copy(alpha = 0.3f),
+            ),
+        )
     }
 }
