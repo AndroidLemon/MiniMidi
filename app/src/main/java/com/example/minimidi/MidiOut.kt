@@ -69,7 +69,7 @@ class MidiOut(context: Context) {
             // Close anything we won't keep: a device held without a port would block every later reconnect.
             val p = if (started) d?.openInputPort(0) else null // null if another app holds the port
             if (d == null || p == null) {
-                d?.close()
+                try { d?.close() } catch (_: IOException) {}
                 return@openDevice
             }
             device = d
@@ -79,10 +79,9 @@ class MidiOut(context: Context) {
     }
 
     private fun close() {
-        port?.close()
-        device?.close()
-        port = null
-        device = null
-        connected = false
+        val p = port; val d = device
+        port = null; device = null; connected = false
+        try { p?.close() } catch (_: IOException) {}
+        try { d?.close() } catch (_: IOException) {}
     }
 }
