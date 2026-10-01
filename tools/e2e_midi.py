@@ -59,8 +59,8 @@ def wait_for(port, backlog, kind, note, timeout=1.0):
 def main():
     hint = sys.argv[1] if len(sys.argv) > 1 else ""
     pads = visible_pads()
-    if len(pads) < 8:
-        sys.exit(f"Expected at least 8 pads on screen, found {sorted(pads)}")
+    if sorted(pads) not in (list(range(1, 9)), list(range(1, 17))):
+        sys.exit(f"Expected pads 1..8 or 1..16 on screen, found {sorted(pads)}")
     failures = []
     with open_port(hint) as port:
         for _ in port.iter_pending():
