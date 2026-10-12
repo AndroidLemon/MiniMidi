@@ -158,6 +158,19 @@ def fresh_pad1():
     return list(map(str, visible_pads()[1]))
 
 
+def restore_pad1(bad):
+    """Put pad 1 back to its default mapping (the map persists on the phone). Never raises."""
+    try:
+        if find("Done editing", nodes()) is None:
+            tap("EDIT")
+        adb("shell", "input", "tap", *fresh_pad1())
+        time.sleep(0.5)
+        tap("Reset pad")
+        tap("Done editing")
+    except (Missing, subprocess.CalledProcessError, KeyError) as e:
+        bad.append(f"restore of pad 1 failed, reset it by hand: {e!r}")
+
+
 def pass_learn(port, backlog, pads, out):
     bad = []
     try:
@@ -167,7 +180,6 @@ def pass_learn(port, backlog, pads, out):
         time.sleep(0.5)
         tree = nodes()
         if find("Learn", tree) is None:
-            tap("Done editing", tree)
             return ["LEARN not shown: the phone's MIDI input port isn't connected (is the Mac's port visible to the phone?)"]
         tap("Learn", tree)
         time.sleep(0.3)
@@ -178,17 +190,15 @@ def pass_learn(port, backlog, pads, out):
         settle(port, backlog)
         adb("shell", "input", "tap", *map(str, pads[1]))  # edit mode closed: the grid is full size again
         bad += check_hit(port, backlog, 60, 1, None, "learned pad 1")
+    except Missing as e:
+        bad.append(str(e))
+    finally:
         # Restore the default mapping whatever happened above.
-        tap("EDIT")
-        adb("shell", "input", "tap", *fresh_pad1())
-        time.sleep(0.5)
-        tap("Reset pad")
-        tap("Done editing")
+        restore_pad1(bad)
+    if not bad:
         settle(port, backlog)
         adb("shell", "input", "tap", *map(str, pads[1]))
         bad += check_hit(port, backlog, FIRST_NOTE, CHANNEL, None, "reset pad 1")
-    except Missing as e:
-        bad.append(str(e))
     return bad
 
 
@@ -199,6 +209,8 @@ def main():
     end = time.monotonic() + 5  # let the app notice the new USB mode
     while time.monotonic() < end and find("MIDI connected", nodes()) is None:
         time.sleep(0.5)
+    if find("Bank A", nodes()) is None:
+        sys.exit('Expected the phone to show "Bank A"; switch to bank A (settings and edit closed) and rerun')
     pads = visible_pads()
     if sorted(pads) not in (list(range(1, 9)), list(range(1, 17))):
         sys.exit(f"Expected pads 1..8 or 1..16 on screen, found {sorted(pads)}")
