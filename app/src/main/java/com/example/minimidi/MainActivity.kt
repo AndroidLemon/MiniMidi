@@ -1,6 +1,7 @@
 package com.example.minimidi
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,6 +16,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
+private const val ECHO_WINDOW_MS = 100L
+
 class MainActivity : ComponentActivity() {
     private lateinit var midi: MidiOut
     private lateinit var engine: PadEngine
@@ -25,6 +28,9 @@ class MainActivity : ComponentActivity() {
     private var pads by mutableStateOf(DEFAULT_PADS)
     private var bank by mutableIntStateOf(0)
     private var heardNote by mutableStateOf<HeardNote?>(null)
+    // Plain fields, not Compose state: notes from the computer only touch the UI while LEARN is armed.
+    private var learnArmed = false
+    private var lastSentAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,8 +38,11 @@ class MainActivity : ComponentActivity() {
         pads = prefs.loadPads()
         bank = prefs.loadBank()
         midi = MidiOut(this)
-        midi.onNote = { channel, note -> heardNote = HeardNote(channel, note) }
-        engine = PadEngine(midi::send)
+        midi.onNote = { channel, note ->
+            // A note right after our own pad press is probably the DAW echoing it back: not something to learn.
+            if (learnArmed && SystemClock.uptimeMillis() - lastSentAt > ECHO_WINDOW_MS) heardNote = HeardNote(channel, note)
+        }
+        engine = PadEngine { bytes -> lastSentAt = SystemClock.uptimeMillis(); midi.send(bytes) }
         val haptics = Haptics(this)
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -49,6 +58,7 @@ class MainActivity : ComponentActivity() {
                     bank = bank,
                     onBankChange = { bank = it; prefs.saveBank(it) },
                     heardNote = heardNote,
+                    onArmedChange = { learnArmed = it },
                     engine = engine,
                     haptics = haptics,
                 )

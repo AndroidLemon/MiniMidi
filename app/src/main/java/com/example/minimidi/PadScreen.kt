@@ -81,6 +81,7 @@ fun PadScreen(
     bank: Int,
     onBankChange: (Int) -> Unit,
     heardNote: HeardNote?,
+    onArmedChange: (Boolean) -> Unit,
     engine: PadEngine,
     haptics: Haptics,
 ) {
@@ -106,6 +107,7 @@ fun PadScreen(
             edit { Pad(note, h.channel) }
             armed = false
         }
+        LaunchedEffect(armed) { onArmedChange(armed) }
         LaunchedEffect(inputConnected) { if (!inputConnected) armed = false }
 
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 8.dp)) {
