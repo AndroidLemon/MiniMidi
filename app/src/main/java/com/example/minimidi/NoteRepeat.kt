@@ -56,6 +56,13 @@ class ClockSource(private val nowNanos: () -> Long) {
     }
 }
 
+/**
+ * INT-loop catch-up: when [now] is more than one [period] past the next [deadline] (the thread stalled), how many grid
+ * ticks to skip so the deadline lands on the first grid line after [now]; 0 when not that far behind.
+ */
+fun missedTicks(now: Long, deadline: Long, period: Long): Long =
+    if (now - deadline > period) (now - deadline) / period + 1 else 0
+
 enum class ClockMode { EXT, INT }
 
 /**
@@ -184,7 +191,17 @@ class NoteRepeat(
                     advance()
                     throttledRefresh()
                 }
-                deadline += (60_000_000_000.0 / (internalBpm.coerceIn(30, 300) * 24)).toLong()
+                val period = (60_000_000_000.0 / (internalBpm.coerceIn(30, 300) * 24)).toLong()
+                deadline += period
+                // After a stall, don't replay every missed tick back-to-back: advance the count silently, keep the grid phase.
+                val skip = missedTicks(System.nanoTime(), deadline, period)
+                if (skip > 0) {
+                    synchronized(lock) {
+                        if (intGen != g) return@Runnable
+                        tick += skip
+                    }
+                    deadline += skip * period
+                }
             }
         })
     }

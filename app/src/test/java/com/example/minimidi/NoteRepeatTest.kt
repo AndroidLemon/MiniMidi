@@ -135,7 +135,8 @@ class NoteRepeatTest {
     private val sent = mutableListOf<List<Int>>()
     private var nanos = 1_000_000_000L
     private val engine = PadEngine { sent += it.u() }
-    private val nr = NoteRepeat(engine, { nanos }, { it.run() })
+    // INT thread is never started here (a real one would race the manual clocks and flake tick-exact assertions)
+    private val nr = NoteRepeat(engine, { nanos }, { it.run() }, { r -> Thread(r) })
     private val kick = DEFAULT_PADS[0]
 
     /** Runs [n] clocks; returns the tick offsets (0-based) at which a retrigger (note-on) was sent. */
@@ -242,4 +243,19 @@ class NoteRepeatTest {
         nr.externalSongPosition(1) // tick 6
         assertEquals(listOf(6), clocks(7)) // ticks 6..12: only 12 (6 is not >= 3 after the clamped press)
     }
+
+    @Test fun missedTicksPure() {
+        val p = 20L
+        assertEquals(0L, missedTicks(1000, 1000, p))
+        assertEquals(0L, missedTicks(1000 + p, 1000, p)) // exactly one period behind: not a stall
+        assertEquals(0L, missedTicks(900, 1000, p)) // early
+        assertEquals(2L, missedTicks(1000 + p + 1, 1000, p))
+        assertEquals(4L, missedTicks(1000 + 3 * p + 10, 1000, p))
+        // the new deadline after skipping is always in the future and on the grid
+        for (late in listOf(21L, 40L, 41L, 100L, 1234L)) {
+            val m = missedTicks(1000 + late, 1000, p)
+            assertTrue(1000 + m * p > 1000 + late); assertTrue(1000 + (m - 1) * p <= 1000 + late)
+        }
+    }
+
 }
