@@ -9,7 +9,7 @@ A fourth pass runs only on request (--repeat) and then replaces the three above 
   repeat semi-manual note repeat check against this Mac's MIDI clock. The script sends Start and clock at
          120 BPM (one every 1/48 s, deadline-paced, every tick timestamped), and waits up to 30 s for you to
          hold REPEAT + pad 1 on the phone (about 3 s); start right after launching it, since Claude Code's `!`
-         only shows output at the end. From the first hit it records note 36 ch 10 for 5 s, then sends Stop.
+         only shows output at the end. From the first hit it records note 36 ch 10 until you let go (max 15 s), then sends Stop.
          Asserts: at least max(2, int(3*2*24/per*0.7)) note_ons; every note_on after the first at a
          multiple of the rate's tick count, or one tick after it when that count is >= 4 (late, never
          early; rate read from the screen, "Repeat rate 1/16" = 6 ticks); each note_on after
@@ -221,7 +221,7 @@ RATE_TICKS = {"1/4": 24, "1/8": 12, "1/8T": 8, "1/16": 6, "1/16T": 4, "1/32": 3,
 BPM = 120
 TICK_S = 60.0 / BPM / 24  # 1/48 s
 START_WAIT_S = 30  # seconds to wait for the user's first hit
-RECORD_S = 5.0
+RECORD_S = 15.0  # cap; recording ends once the user releases
 
 
 def run_clock(out, ticks, stop):
@@ -267,7 +267,12 @@ def pass_repeat(port, out, rate):
         if not events:
             bad.append(f"no hit on pad 1 within {START_WAIT_S} s")
         else:
-            time.sleep(RECORD_S)
+            # Record until the user lets go: a final note_off followed by a quiet gap, capped at RECORD_S.
+            end = time.monotonic() + RECORD_S
+            while time.monotonic() < end:
+                time.sleep(0.05)
+                if events[-1][0] == "note_off" and time.perf_counter() - events[-1][1] > 4 * per * TICK_S:
+                    break
     finally:
         stop.set()
         clock.join(timeout=1.0)
