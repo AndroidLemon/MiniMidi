@@ -4,13 +4,14 @@ v1 merged to `main` on 2026-10-01. It is verified on a Galaxy Z Fold5, and the e
 
 ## Next features (committed follow-ups from the spec and plan)
 
-- [ ] **Per-pad remap** (note and channel) through an explicit edit mode; persist `PadMap`.
-- [ ] **Banks**: shift all pads ±16 notes.
+- [x] **Per-pad remap** (note and channel) through an explicit edit mode, with MIDI learn; `PadMap` persisted (2026-10-11).
+- [x] **Banks** A–F: shift all pads by 16 notes (2026-10-11).
+- [ ] **MPC-style A–D banks**: four independent 16-pad maps instead of one offset map. Saved format `padmap.v1` would become per-bank.
 - [ ] **Bluetooth MIDI output**: a BLE MIDI GATT server with the phone as peripheral, added beside `MidiOut`.
 
 ## Candidate features (not yet committed)
 
-Several of these need **MIDI input** (receiving from the DAW): clock for note repeat, notes for pad lighting. If note repeat is wanted, plan MIDI input before Bluetooth MIDI, since both build on the same MIDI port work.
+Several of these need **MIDI input** (receiving from the DAW; the port and `MidiParser` exist since 2026-10-11, parser needs clock support): clock for note repeat, notes for pad lighting. If note repeat is wanted, plan MIDI input before Bluetooth MIDI, since both build on the same MIDI port work.
 
 Worth adding:
 
@@ -54,9 +55,9 @@ Skipped: on-device sounds or a sampler, a step sequencer, and an XY pad or touch
 ## Polish and cleanup (minor review findings)
 
 - [ ] Replace the template **launcher icon**. It's the green Android robot with a gradient, which breaks the "no gradients" rule, and it also shows on the splash screen.
-- [ ] Switch rows in settings report `checked=false` to TalkBack regardless of state. Use `Modifier.toggleable`.
-- [ ] Give the settings scrim a click label ("Close settings") for TalkBack.
-- [ ] Have `tools/e2e_midi.py` assert:
+- [x] Switch rows in settings report `checked=false` to TalkBack regardless of state. Use `Modifier.toggleable`.
+- [x] Give the settings scrim a click label ("Close settings") for TalkBack.
+- [x] Have `tools/e2e_midi.py` assert:
   - velocity equals the fixed value (100);
   - the note_off channel;
   - and print adb's stderr on failure.
@@ -69,7 +70,9 @@ Skipped: on-device sounds or a sampler, a step sequencer, and an XY pad or touch
 ## Dev environment notes
 
 - Gradle: run a bare `./gradlew --offline -g .gradle-home …`. The sandbox excludes `./gradlew *`.
-- adb: set `ANDROID_SERIAL=RFCW709RGRH`. A stale offline `emulator-5562` is still registered.
+- adb over Wi-Fi (paired 2026-10-11): `ANDROID_SERIAL=adb-RFCW709RGRH-XxXrqF._adb-tls-connect._tcp` (mDNS name, survives port changes). Never start the adb server inside the sandbox: it can't reach the LAN. If pairing/connect fails with "protocol fault", `! adb kill-server`.
+- USB MIDI mode can be set remotely: `adb shell svc usb setFunctions midi`.
+- The offline `emulator-5562` is Native Instruments' NTKDaemon on port 5563, not an emulator. Hide it with `export ADB_LOCAL_TRANSPORT_MAX_PORT=5561`.
 - Run `tools/e2e_midi.py` outside the sandbox, because CoreMIDI is blocked inside it.
 
 ## Separate future app (not MiniMidi)
