@@ -7,8 +7,9 @@
 
 A fourth pass runs only on request (--repeat) and then replaces the three above (same startup checks):
   repeat semi-manual note repeat check against this Mac's MIDI clock. The script sends Start and clock at
-         120 BPM (one every 1/48 s, deadline-paced, every tick timestamped), prints a prompt, and you hold
-         REPEAT + pad 1 on the phone for about 3 s. It records note 36 ch 10 for 5 s, then sends Stop.
+         120 BPM (one every 1/48 s, deadline-paced, every tick timestamped), and waits up to 30 s for you to
+         hold REPEAT + pad 1 on the phone (about 3 s); start right after launching it, since Claude Code's `!`
+         only shows output at the end. From the first hit it records note 36 ch 10 for 5 s, then sends Stop.
          Asserts: at least max(2, int(3*2*24/per*0.7)) note_ons; every note_on after the first at a
          multiple of the rate's tick count, or one tick after it when that count is >= 4 (late, never
          early; rate read from the screen, "Repeat rate 1/16" = 6 ticks); each note_on after
@@ -219,6 +220,7 @@ def pass_learn(port, backlog, pads, out):
 RATE_TICKS = {"1/4": 24, "1/8": 12, "1/8T": 8, "1/16": 6, "1/16T": 4, "1/32": 3, "1/32T": 2}
 BPM = 120
 TICK_S = 60.0 / BPM / 24  # 1/48 s
+START_WAIT_S = 30  # seconds to wait for the user's first hit
 RECORD_S = 5.0
 
 
@@ -257,9 +259,15 @@ def pass_repeat(port, out, rate):
     try:
         out.send(mido.Message("start"))
         clock.start()
-        time.sleep(0.5)
-        print(f"\n  >>> Hold REPEAT and pad 1 now, for about 3 s  (rate {rate}, {per} ticks, {BPM} BPM) <<<\n")
-        time.sleep(RECORD_S)
+        # Claude Code's `!` shows output only when the command ends, so don't rely on a prompt: wait for the first hit.
+        print(f"\n  >>> Hold REPEAT and pad 1 within {START_WAIT_S} s, for about 3 s  (rate {rate}, {per} ticks, {BPM} BPM) <<<\n", flush=True)
+        end = time.monotonic() + START_WAIT_S
+        while time.monotonic() < end and not any(e[0] == "note_on" for e in events):
+            time.sleep(0.01)
+        if not events:
+            bad.append(f"no hit on pad 1 within {START_WAIT_S} s")
+        else:
+            time.sleep(RECORD_S)
     finally:
         stop.set()
         clock.join(timeout=1.0)
@@ -267,6 +275,8 @@ def pass_repeat(port, out, rate):
         out.send(mido.Message("stop"))
     if not ticks:
         return ["no clock was sent"]
+    if bad:
+        return bad
     ons = [e for e in events if e[0] == "note_on"]
     print(f"  recorded {len(ons)} note_on, {len(events) - len(ons)} note_off for note {FIRST_NOTE}; {len(ticks)} clock ticks sent")
     # 3 s hold at 120 BPM = 2 beats/s = 48 ticks/s; allow 30% slack for the finger landing/lifting.
