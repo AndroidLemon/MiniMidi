@@ -200,4 +200,33 @@ class NoteRepeatTest {
         assertEquals(ClockMode.INT, nr.source)
         assertEquals(94, nr.bpm)
     }
+
+    @Test fun refreshStartsIntWhenHeldAndExternalClockLapsed() {
+        val spawned = mutableListOf<Thread>()
+        val e = PadEngine { }
+        val n = NoteRepeat(e, { nanos }, { it.run() }, { r -> Thread(r).also { spawned += it } }) // never started
+        n.hold(true) // no external clock: INT starts
+        assertEquals(1, spawned.size)
+        n.refresh() // INT already running: no second thread
+        assertEquals(1, spawned.size)
+        n.hold(false)
+        nanos += 1_000_000_000L
+        n.refresh() // not held: nothing
+        assertEquals(1, spawned.size)
+
+        // Held while external clock runs, then the clock lapses.
+        val e2 = PadEngine { }
+        val n2 = NoteRepeat(e2, { nanos }, { it.run() }, { r -> Thread(r).also { spawned += it } })
+        repeat(10) { n2.externalClock(); nanos += tickNs }
+        n2.hold(true)
+        assertEquals(1, spawned.size) // EXT running: no INT
+        n2.refresh()
+        assertEquals(1, spawned.size)
+        nanos += 1_000_000_000L // Logic stopped
+        n2.refresh()
+        assertEquals(2, spawned.size)
+        n2.refresh()
+        assertEquals(2, spawned.size)
+        assertEquals(ClockMode.INT, n2.source)
+    }
 }

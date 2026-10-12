@@ -10,6 +10,13 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.input.pointer.pointerInput
+import android.os.SystemClock
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Box
@@ -25,6 +32,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -83,6 +92,7 @@ fun PadScreen(
     heardNote: HeardNote?,
     onArmedChange: (Boolean) -> Unit,
     engine: PadEngine,
+    noteRepeat: NoteRepeat,
     haptics: Haptics,
 ) {
     var panelOpen by remember { mutableStateOf(false) }
@@ -107,6 +117,14 @@ fun PadScreen(
             edit { Pad(note, h.channel) }
             armed = false
         }
+        LaunchedEffect(settings.rate, settings.internalBpm) {
+            noteRepeat.rate = settings.rate
+            noteRepeat.internalBpm = settings.internalBpm
+            noteRepeat.refresh()
+        }
+        // Drives the EXT -> INT display, and INT taking over when the external clock stops under a held REPEAT.
+        LaunchedEffect(Unit) { while (true) { noteRepeat.refresh(); delay(250) } }
+        LaunchedEffect(panelOpen) { if (panelOpen) noteRepeat.hold(false) }
         LaunchedEffect(armed) { onArmedChange(armed) }
         LaunchedEffect(inputConnected) { if (!inputConnected) armed = false }
 
@@ -133,6 +151,13 @@ fun PadScreen(
                     onLearn = { armed = !armed },
                     onReset = { sel?.let { i -> edit { DEFAULT_PADS[i] } } },
                     onDone = ::endEdit,
+                )
+            }
+            if (!editing) {
+                RepeatRow(
+                    noteRepeat, settings.rate,
+                    onRate = { onSettingsChange(settings.copy(rate = settings.rate.next())) },
+                    onTempo = { onSettingsChange(settings.copy(internalBpm = it)) },
                 )
             }
             SettingsStrip(settings, editing, onEdit = { if (editing) endEdit() else editing = true }, onClick = { panelOpen = true })
@@ -314,6 +339,58 @@ private fun PadCell(index: Int, pad: Pad?, level: State<Float?>, selected: Boole
 }
 
 @Composable
+private fun RepeatRow(noteRepeat: NoteRepeat, rate: Rate, onRate: () -> Unit, onTempo: (Int) -> Unit) {
+    var pressed by remember { mutableStateOf(false) }
+    val tapTempo = remember { TapTempo { SystemClock.uptimeMillis() } }
+    val currentOnTempo by rememberUpdatedState(onTempo)
+    DisposableEffect(Unit) { onDispose { noteRepeat.hold(false) } } // row hidden mid-hold
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .height(48.dp)
+                .semantics { contentDescription = "Note repeat" }
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        pressed = true
+                        noteRepeat.hold(true)
+                        try { waitForUpOrCancellation() } finally { pressed = false; noteRepeat.hold(false) }
+                    }
+                }
+                .padding(end = 16.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text("REPEAT", style = Rhythm.label(if (pressed) Rhythm.Led else Rhythm.Ink))
+        }
+        Box(
+            Modifier
+                .heightIn(min = 48.dp)
+                .widthIn(min = 48.dp)
+                .semantics { contentDescription = "Repeat rate ${rate.label}" }
+                .clickable(interactionSource = null, indication = null, onClick = onRate)
+                .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(rate.label, style = Rhythm.label(Rhythm.Ink))
+        }
+        Spacer(Modifier.weight(1f))
+        Box(
+            Modifier
+                .heightIn(min = 48.dp)
+                .widthIn(min = 48.dp)
+                .semantics { contentDescription = "Tempo" }
+                .clickable(interactionSource = null, indication = null) {
+                    if (noteRepeat.source == ClockMode.INT) tapTempo.tap()?.let { currentOnTempo(it) }
+                }
+                .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("${noteRepeat.source.name} ${noteRepeat.bpm}", style = Rhythm.label(Rhythm.Ink))
+        }
+    }
+}
+
+@Composable
 private fun SettingsStrip(settings: Settings, editing: Boolean, onEdit: () -> Unit, onClick: () -> Unit) {
     Row(
         Modifier
@@ -376,6 +453,14 @@ private fun SettingsPanel(settings: Settings, onChange: (Settings) -> Unit, onDo
                 modifier = Modifier.semantics { contentDescription = "Fixed velocity level" },
             )
         }
+        SettingLabel("Internal tempo ${settings.internalBpm}")
+        Slider(
+            value = settings.internalBpm.toFloat(),
+            onValueChange = { onChange(settings.copy(internalBpm = it.roundToInt().coerceIn(BPM_MIN, BPM_MAX))) },
+            valueRange = BPM_MIN.toFloat()..BPM_MAX.toFloat(),
+            colors = sliderColors,
+            modifier = Modifier.semantics { contentDescription = "Internal tempo" },
+        )
         SettingSwitch("Haptics", settings.haptics) { onChange(settings.copy(haptics = it)) }
         SettingSwitch("Big pads when folded", settings.bigPadsWhenFolded) { onChange(settings.copy(bigPadsWhenFolded = it)) }
         Text(

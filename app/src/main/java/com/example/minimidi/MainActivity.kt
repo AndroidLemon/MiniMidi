@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
                     heardNote = heardNote,
                     onArmedChange = { learnArmed = it },
                     engine = engine,
+                    noteRepeat = noteRepeat,
                     haptics = haptics,
                 )
             }

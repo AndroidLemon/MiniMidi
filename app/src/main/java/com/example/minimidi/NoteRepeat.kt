@@ -70,6 +70,7 @@ class NoteRepeat(
     private val engine: PadEngine,
     private val nowNanos: () -> Long = System::nanoTime,
     private val post: (Runnable) -> Unit = { Handler(Looper.getMainLooper()).post(it) },
+    private val spawn: (Runnable) -> Thread = { r -> Thread(r, "note-repeat-int").apply { isDaemon = true; start() } },
 ) {
     @Volatile var rate = Rate.Sixteenth
     @Volatile var internalBpm = 120
@@ -97,7 +98,7 @@ class NoteRepeat(
         if (down) {
             engine.heldPointers().forEach { pressTicks[it] = tick }
             // INT counts from 0 at the REPEAT press; an already-running EXT clock keeps its own count.
-            if (!clock.external()) { tick = 0; engine.heldPointers().forEach { pressTicks[it] = 0 }; startInt() }
+            if (!clock.external()) startIntFromZero()
         } else stopInt()
         refreshLocked()
     }
@@ -118,7 +119,17 @@ class NoteRepeat(
     fun externalSongPosition(sixteenths: Int) = synchronized(lock) { tick = sixteenths * 6L }
 
     /** Recomputes [source] and [bpm] now. Cheap; a UI may poll it so a vanished external clock shows as INT. */
-    fun refresh() = synchronized(lock) { refreshLocked() }
+    fun refresh() = synchronized(lock) {
+        // REPEAT held, external clock gone (Logic stopped) and INT idle: carry on at the phone's tempo.
+        if (held && intThread == null && !clock.external()) startIntFromZero()
+        refreshLocked()
+    }
+
+    private fun startIntFromZero() {
+        tick = 0
+        engine.heldPointers().forEach { pressTicks[it] = 0 }
+        startInt()
+    }
 
     // Callers hold [lock]. Processes the clock position `tick`, then moves to the next one.
     private fun advance() {
@@ -150,7 +161,7 @@ class NoteRepeat(
     private fun startInt() {
         stopInt()
         val g = intGen
-        intThread = Thread({
+        intThread = spawn(Runnable {
             runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO) }
             var deadline = System.nanoTime()
             while (true) {
@@ -160,12 +171,12 @@ class NoteRepeat(
                     LockSupport.parkNanos(rem)
                 }
                 synchronized(lock) {
-                    if (intGen != g) return@Thread
+                    if (intGen != g) return@Runnable
                     advance()
                     throttledRefresh()
                 }
                 deadline += (60_000_000_000.0 / (internalBpm.coerceIn(30, 300) * 24)).toLong()
             }
-        }, "note-repeat-int").apply { isDaemon = true; start() }
+        })
     }
 }
