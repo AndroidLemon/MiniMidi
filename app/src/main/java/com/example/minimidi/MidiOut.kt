@@ -46,7 +46,7 @@ class MidiOut(context: Context) {
     private val manager = context.getSystemService(MidiManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
     private var device: MidiDevice? = null
-    private var port: MidiInputPort? = null
+    @Volatile private var port: MidiInputPort? = null
     private var outPort: MidiOutputPort? = null
     private var receiver: MidiReceiver? = null
     private var opening = false
@@ -73,13 +73,16 @@ class MidiOut(context: Context) {
         close()
     }
 
-    /** Never throws: a failed write (cable yanked mid-send) just marks us disconnected. */
+    /**
+     * Never throws: a failed write (cable yanked mid-send) just marks us disconnected. May run on the MIDI or INT thread,
+     * so the teardown is posted to main (where open/close and the Compose state live); close() is idempotent.
+     */
     fun send(bytes: ByteArray) {
         val p = port ?: return
         try {
             p.send(bytes, 0, bytes.size)
         } catch (e: IOException) {
-            close()
+            handler.post { if (port === p) close() } // a stale failure after a reconnect must not tear down the new port
         }
     }
 
