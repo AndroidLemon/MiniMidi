@@ -236,6 +236,7 @@ private fun PadGrid(
                         val i = e.actionIndex
                         val pad = hitTest(e.getX(i), e.getY(i), size.width.toFloat(), size.height.toFloat(), currentLayout)
                         val played = pad?.let { played(currentPads[it], currentBank) } // null: out of range in this bank, silent
+                        if (pad != null) currentOnSelect(pad) // dimmed pads can still be selected for editing
                         if (pad != null && played != null) {
                             val s = currentSettings
                             val v = velocity(e.getTouchMajor(i) / density, s.sensitivity, s.fixedVelocity, s.fixedValue)
@@ -244,7 +245,6 @@ private fun PadGrid(
                             fingers.remove(id)?.let { refresh(it.first) } // stale entry from a missed UP
                             fingers[id] = pad to v / 127f
                             refresh(pad)
-                            currentOnSelect(pad)
                             if (s.haptics) haptics.tick(v)
                         }
                     }
