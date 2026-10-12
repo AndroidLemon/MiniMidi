@@ -89,6 +89,9 @@ class NoteRepeat(
     private var intThread: Thread? = null
     private var lastUiNanos = 0L
 
+    /** Current clock position in ticks (for tests). */
+    internal val position: Long get() = synchronized(lock) { tick }
+
     init { engine.onPress = ::onPress }
 
     fun onPress(pointerId: Int) { synchronized(lock) { pressTicks[pointerId] = tick } }
@@ -113,10 +116,16 @@ class NoteRepeat(
         advance()
         throttledRefresh()
     }
-    fun externalStart() = synchronized(lock) { tick = 0 }
+    fun externalStart() = synchronized(lock) { setTick(0) }
     fun externalContinue() {} // ticks keep counting from where Start/SPP/Stop left them
     fun externalStop() = refresh()
-    fun externalSongPosition(sixteenths: Int) = synchronized(lock) { tick = sixteenths * 6L }
+    fun externalSongPosition(sixteenths: Int) = synchronized(lock) { setTick(sixteenths * 6L) }
+
+    // Moving the clock position backwards must not leave held pads with press ticks in the future (fires() would stay false).
+    private fun setTick(t: Long) {
+        tick = t
+        pressTicks.replaceAll { _, v -> minOf(v, t) }
+    }
 
     /** Recomputes [source] and [bpm] now. Cheap; a UI may poll it so a vanished external clock shows as INT. */
     fun refresh() = synchronized(lock) {

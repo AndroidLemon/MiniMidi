@@ -229,4 +229,17 @@ class NoteRepeatTest {
         assertEquals(2, spawned.size)
         assertEquals(ClockMode.INT, n2.source)
     }
+
+    // --- review fixes ---
+    @Test fun repeatsResumeAfterStartResetsTickWhilePadHeld() {
+        nr.hold(true); clocks(300); engine.press(1, kick, 100); sent.clear()
+        nr.externalStart() // tick -> 0 while the pad's press tick is still 300
+        assertEquals(listOf(6, 12), clocks(13))
+    }
+
+    @Test fun repeatsResumeAfterSongPositionBackwardsWhilePadHeld() {
+        nr.hold(true); clocks(300); engine.press(1, kick, 100); sent.clear()
+        nr.externalSongPosition(1) // tick 6
+        assertEquals(listOf(6), clocks(7)) // ticks 6..12: only 12 (6 is not >= 3 after the clamped press)
+    }
 }
