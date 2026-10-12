@@ -12,7 +12,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.ui.input.pointer.pointerInput
 import android.os.SystemClock
 import kotlinx.coroutines.delay
@@ -155,7 +154,7 @@ fun PadScreen(
             }
             if (!editing) {
                 RepeatRow(
-                    noteRepeat, settings.rate,
+                    noteRepeat, panelOpen, settings.rate,
                     onRate = { onSettingsChange(settings.copy(rate = settings.rate.next())) },
                     onTempo = { onSettingsChange(settings.copy(internalBpm = it)) },
                 )
@@ -339,22 +338,27 @@ private fun PadCell(index: Int, pad: Pad?, level: State<Float?>, selected: Boole
 }
 
 @Composable
-private fun RepeatRow(noteRepeat: NoteRepeat, rate: Rate, onRate: () -> Unit, onTempo: (Int) -> Unit) {
+private fun RepeatRow(noteRepeat: NoteRepeat, panelOpen: Boolean, rate: Rate, onRate: () -> Unit, onTempo: (Int) -> Unit) {
     var pressed by remember { mutableStateOf(false) }
     val tapTempo = remember { TapTempo { SystemClock.uptimeMillis() } }
     val currentOnTempo by rememberUpdatedState(onTempo)
     DisposableEffect(Unit) { onDispose { noteRepeat.hold(false) } } // row hidden mid-hold
+    LaunchedEffect(panelOpen) { if (panelOpen) pressed = false } // hold(false) is forced when settings opens: don't stay lit
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier
                 .height(48.dp)
+                .widthIn(min = 96.dp)
                 .semantics { contentDescription = "Note repeat" }
                 .pointerInput(Unit) {
                     awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
+                        val id = awaitFirstDown(requireUnconsumed = false).id
                         pressed = true
                         noteRepeat.hold(true)
-                        try { waitForUpOrCancellation() } finally { pressed = false; noteRepeat.hold(false) }
+                        try {
+                            // Hold until this finger lifts, wherever it has drifted (waitForUpOrCancellation would end at the bounds).
+                            do { val event = awaitPointerEvent() } while (event.changes.any { it.id == id && it.pressed })
+                        } finally { pressed = false; noteRepeat.hold(false) }
                     }
                 }
                 .padding(end = 16.dp),
