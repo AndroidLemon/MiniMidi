@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
-"""End-to-end check over adb + USB MIDI. Three passes, each PASS/FAIL:
+"""End-to-end check over adb + USB MIDI. Three default passes, each PASS/FAIL:
   pads   tap every visible pad; assert note_on (ch 10, the phone's fixed velocity) and note_off (ch 10) arrive here
   bank   Next bank, tap pad 1, expect note 52 on ch 10, Previous bank
   learn  EDIT, pad 1, LEARN, send note 60 on ch 2 from this Mac, DONE, tap pad 1, expect 60 on ch 2;
          then restore pad 1 (RESET PAD) and expect 36 on ch 10 again
 
-Usage:  .venv/bin/python tools/e2e_midi.py [port-substring]
+A fourth pass runs only on request (--repeat) and then replaces the three above (same startup checks):
+  repeat semi-manual note repeat check against this Mac's MIDI clock. The script sends Start and clock at
+         120 BPM (one every 1/48 s, deadline-paced, every tick timestamped), prints a prompt, and you hold
+         REPEAT + pad 1 on the phone for about 3 s. It records note 36 ch 10 for 5 s, then sends Stop.
+         Asserts: at least 8 note_ons; every note_on after the first within 1 tick of a multiple of the
+         rate's tick count (rate read from the screen, "Repeat rate 1/16" = 6 ticks); each note_on after
+         the first preceded by a note_off; a final note_off after release. Prints count, mean/max
+         deviation from the grid tick time (ms) and mean interval (125 ms at 1/16 @ 120 BPM).
+
+Usage:  .venv/bin/python tools/e2e_midi.py [port-substring] [--repeat]
 Phone:  USB debugging on, MiniMidi in the foreground on bank A, settings panel closed,
         Fixed velocity ON (any level: the script reads it off the screen and asserts it).
         The script itself switches the USB mode to MIDI (`adb shell svc usb setFunctions midi`).
 With several adb devices (e.g. over Wi-Fi) pick one the way adb does:
         ANDROID_SERIAL=adb-RFCW709RGRH-XxXrqF._adb-tls-connect._tcp .venv/bin/python tools/e2e_midi.py
+Repeat pass:
+        ANDROID_SERIAL=adb-RFCW709RGRH-XxXrqF._adb-tls-connect._tcp .venv/bin/python tools/e2e_midi.py SAMSUNG --repeat
 If an adb call fails, adb's stderr is printed and the script exits non-zero, as it does on any FAIL.
 """
 import os
@@ -18,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
 
@@ -202,8 +214,96 @@ def pass_learn(port, backlog, pads, out):
     return bad
 
 
+# Ticks per repeat for each rate label shown on the phone ("Repeat rate <label>"), 24 ticks per quarter note.
+RATE_TICKS = {"1/4": 24, "1/8": 12, "1/8T": 8, "1/16": 6, "1/16T": 4, "1/32": 3, "1/32T": 2}
+BPM = 120
+TICK_S = 60.0 / BPM / 24  # 1/48 s
+RECORD_S = 5.0
+
+
+def run_clock(out, ticks, stop):
+    """Send 'clock' every TICK_S on absolute perf_counter deadlines (no sleep drift); log (index, send time).
+    Tick 0 is the first clock after Start, as in the app."""
+    base = time.perf_counter()
+    i = 0
+    while not stop.is_set():
+        delay = base + i * TICK_S - time.perf_counter()
+        if delay > 0:
+            stop.wait(delay)
+            if stop.is_set():
+                break
+        out.send(mido.Message("clock"))
+        ticks.append((i, time.perf_counter()))
+        i += 1
+
+
+def pass_repeat(port, out, rate):
+    """Semi-manual: the user holds REPEAT + pad 1 (adb can't hold two fingers). Returns failure strings."""
+    bad = []
+    per = RATE_TICKS[rate]
+    events = []  # (type, perf_counter receive time, channel) for note 36
+    ticks = []
+    stop = threading.Event()
+    clock = threading.Thread(target=run_clock, args=(out, ticks, stop), daemon=True)
+
+    def on_msg(msg):
+        if msg.type in ("note_on", "note_off") and msg.note == FIRST_NOTE:
+            kind = "note_off" if msg.type == "note_off" or msg.velocity == 0 else "note_on"
+            events.append((kind, time.perf_counter(), msg.channel))
+
+    list(port.iter_pending())
+    port.callback = on_msg
+    try:
+        out.send(mido.Message("start"))
+        clock.start()
+        time.sleep(0.5)
+        print(f"\n  >>> Hold REPEAT and pad 1 now, for about 3 s  (rate {rate}, {per} ticks, {BPM} BPM) <<<\n")
+        time.sleep(RECORD_S)
+    finally:
+        stop.set()
+        clock.join(timeout=1.0)
+        port.callback = None
+        out.send(mido.Message("stop"))
+    if not ticks:
+        return ["no clock was sent"]
+    ons = [e for e in events if e[0] == "note_on"]
+    print(f"  recorded {len(ons)} note_on, {len(events) - len(ons)} note_off for note {FIRST_NOTE}; {len(ticks)} clock ticks sent")
+    if len(ons) < 8:
+        bad.append(f"expected at least 8 note_ons for note {FIRST_NOTE}, got {len(ons)}")
+    for kind, t, ch in events:
+        if ch != CHANNEL:
+            bad.append(f"{kind} on ch {ch + 1} at {t:.3f}, want ch {CHANNEL + 1}")
+    # Every note_on after the first must directly follow a note_off (no overlap / stuck note).
+    for n, ev in enumerate(events):
+        if ev[0] == "note_on" and n > 0 and events[n - 1][0] != "note_off":
+            bad.append(f"note_on at {ev[1]:.3f} not preceded by a note_off (overlapping or stuck)")
+    if events and events[-1][0] != "note_off":
+        bad.append("no final note_off after release (note stuck on)")
+    # Timing: nearest sent tick by receive time, then nearest multiple of `per`, tolerance 1 tick.
+    by_index = dict(ticks)
+    devs = []
+    for k, (_, t, _) in enumerate(ons):
+        if k == 0:
+            continue  # the immediate hit on press, not grid-aligned
+        idx = min(ticks, key=lambda x: abs(x[1] - t))[0]
+        grid = round(idx / per) * per
+        if abs(idx - grid) > 1:
+            bad.append(f"note_on #{k + 1} at tick {idx}: off the {per}-tick grid by {idx - grid} ticks")
+        if grid in by_index:
+            devs.append(abs(t - by_index[grid]) * 1000)
+    if devs:
+        gaps = [(b[1] - a[1]) * 1000 for a, b in zip(ons[1:], ons[2:])]
+        print(f"  timing: {len(devs)} repeats, deviation from grid tick mean {sum(devs) / len(devs):.1f} ms, max {max(devs):.1f} ms;"
+              f" mean interval {sum(gaps) / len(gaps) if gaps else float('nan'):.1f} ms"
+              f" (expect {per * TICK_S * 1000:.1f} ms)")
+    return bad
+
+
 def main():
-    hint = sys.argv[1] if len(sys.argv) > 1 else ""
+    args = sys.argv[1:]
+    repeat = "--repeat" in args
+    args = [a for a in args if a != "--repeat"]
+    hint = args[0] if args else ""
     adb("shell", "svc", "usb", "setFunctions", "midi")
     wait_for_port(hint)
     end = time.monotonic() + 5  # let the app notice the new USB mode
@@ -220,12 +320,22 @@ def main():
     if sorted(pads) not in (list(range(1, 9)), list(range(1, 17))):
         sys.exit(f"Expected pads 1..8 or 1..16 on screen, found {sorted(pads)}")
     results = {}
-    with open_port(hint) as port, open_port(hint, output=True) as out:
-        list(port.iter_pending())  # drain anything stale
-        backlog = []
-        results["pads"] = pass_pads(port, backlog, pads)
-        results["bank"] = pass_bank(port, backlog, pads)
-        results["learn"] = pass_learn(port, backlog, pads, out)
+    if repeat:
+        labels = [d[len("Repeat rate "):] for d, _, _ in nodes() if d.startswith("Repeat rate ")]
+        if not labels or labels[0] not in RATE_TICKS:
+            sys.exit(f"Could not read a known 'Repeat rate <label>' off the screen (got {labels}); is the REPEAT row visible?")
+        with open_port(hint) as port, open_port(hint, output=True) as out:
+            try:
+                results["repeat"] = pass_repeat(port, out, labels[0])
+            finally:
+                out.send(mido.Message("stop"))
+    else:
+        with open_port(hint) as port, open_port(hint, output=True) as out:
+            list(port.iter_pending())  # drain anything stale
+            backlog = []
+            results["pads"] = pass_pads(port, backlog, pads)
+            results["bank"] = pass_bank(port, backlog, pads)
+            results["learn"] = pass_learn(port, backlog, pads, out)
     print()
     for name, bad in results.items():
         print(f"{'PASS' if not bad else 'FAIL'}  {name}")
@@ -233,6 +343,9 @@ def main():
             print(f"      {b}")
     if any(results.values()):
         sys.exit(1)
+    if repeat:
+        print("OK: note repeat locked to the Mac's MIDI clock")
+        return
     print(f"OK: {len(pads)} pads -> notes {FIRST_NOTE}..{FIRST_NOTE + max(pads) - 1} ch 10 vel {VELOCITY}; bank and learn passes")
 
 
