@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """End-to-end check over adb + USB MIDI. Three passes, each PASS/FAIL:
-  pads   tap every visible pad; assert note_on (ch 10, velocity 100) and note_off (ch 10) arrive here
+  pads   tap every visible pad; assert note_on (ch 10, the phone's fixed velocity) and note_off (ch 10) arrive here
   bank   Next bank, tap pad 1, expect note 52 on ch 10, Previous bank
   learn  EDIT, pad 1, LEARN, send note 60 on ch 2 from this Mac, DONE, tap pad 1, expect 60 on ch 2;
          then restore pad 1 (RESET PAD) and expect 36 on ch 10 again
 
 Usage:  .venv/bin/python tools/e2e_midi.py [port-substring]
 Phone:  USB debugging on, MiniMidi in the foreground on bank A, settings panel closed,
-        Fixed velocity ON at 100 (the velocity assert needs it; set it in the settings panel).
+        Fixed velocity ON (any level: the script reads it off the screen and asserts it).
         The script itself switches the USB mode to MIDI (`adb shell svc usb setFunctions midi`).
 With several adb devices (e.g. over Wi-Fi) pick one the way adb does:
         ANDROID_SERIAL=adb-RFCW709RGRH-XxXrqF._adb-tls-connect._tcp .venv/bin/python tools/e2e_midi.py
@@ -26,7 +26,7 @@ import mido
 ADB = os.environ.get("ADB") or shutil.which("adb") or os.path.expanduser("~/Library/Android/sdk/platform-tools/adb")
 FIRST_NOTE = 36
 CHANNEL = 9  # mido channels are 0-based: 9 is MIDI channel 10
-VELOCITY = 100  # Fixed velocity level the phone must be set to
+VELOCITY = None  # read from the phone's "VELOCITY: FIXED n" strip in main()
 
 
 def adb(*args):
@@ -211,6 +211,11 @@ def main():
         time.sleep(0.5)
     if find("Bank A", nodes()) is None:
         sys.exit('Expected the phone to show "Bank A"; switch to bank A (settings and edit closed) and rerun')
+    global VELOCITY
+    strip = [text for _, text, _ in nodes() if text.startswith("VELOCITY: FIXED ")]
+    if not strip:
+        sys.exit("Turn Fixed velocity on in settings (the velocity assert needs a known level) and rerun")
+    VELOCITY = int(strip[0].rsplit(" ", 1)[1])
     pads = visible_pads()
     if sorted(pads) not in (list(range(1, 9)), list(range(1, 17))):
         sys.exit(f"Expected pads 1..8 or 1..16 on screen, found {sorted(pads)}")
