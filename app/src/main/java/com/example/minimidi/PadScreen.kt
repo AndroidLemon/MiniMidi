@@ -163,7 +163,7 @@ private fun StatusBar(connected: Boolean, bank: Int, onBank: (Int) -> Unit) {
         ) {
             Box(Modifier.size(7.dp).clip(CircleShape).background(if (connected) Rhythm.Led else Rhythm.Led.copy(alpha = 0.2f)))
             Spacer(Modifier.width(6.dp))
-            Text(if (connected) "USB · 10" else "USB → MIDI", style = Rhythm.label(Rhythm.Ink))
+            Text(if (connected) "USB" else "USB → MIDI", style = Rhythm.label(Rhythm.Ink))
         }
     }
 }
