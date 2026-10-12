@@ -197,7 +197,7 @@ private fun PadCell(index: Int, level: State<Float?>, modifier: Modifier) {
     val base = Rhythm.Groups[colourGroup(index)]
     Box(
         modifier
-            .semantics { contentDescription = "Pad ${index + 1}, ${pad.label}" }
+            .semantics { contentDescription = "Pad ${index + 1}, ${padLabel(pad.note, pad.channel)}" }
             .clip(PadShape)
             .drawBehind {
                 // glow is read in the draw phase: the fade redraws each frame without recomposing.
@@ -208,7 +208,7 @@ private fun PadCell(index: Int, level: State<Float?>, modifier: Modifier) {
     ) {
         val ink = Color.Black.copy(alpha = 0.55f)
         Text("${index + 1}", Modifier.align(Alignment.TopStart).padding(6.dp), style = Rhythm.label(ink))
-        Text(pad.label, Modifier.align(Alignment.BottomEnd).padding(6.dp), style = Rhythm.label(ink))
+        Text(padLabel(pad.note, pad.channel), Modifier.align(Alignment.BottomEnd).padding(6.dp), style = Rhythm.label(ink))
     }
 }
 

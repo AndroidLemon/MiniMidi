@@ -34,7 +34,7 @@ class PadEngineTest {
     @Test fun releaseUsesPadCapturedAtPress() {
         var current = kick
         engine.press(1, current, 100)
-        current = Pad(note = 60, channel = 1, label = "X") // remap/bank/fold changed the pad under the finger
+        current = Pad(note = 60, channel = 1) // remap/bank/fold changed the pad under the finger
         sent.clear()
         engine.release(1)
         assertEquals(listOf(listOf(0x89, 0x24, 0)), sent)

@@ -20,7 +20,7 @@ class MidiTest {
         assertEquals(List(16) { 10 }, DEFAULT_PADS.map { it.channel })
         assertEquals(
             listOf("BD", "RS", "SD", "CP", "SD2", "FT", "CH", "FT2", "PH", "LT", "OH", "MT", "MT2", "CY", "HT", "RD"),
-            DEFAULT_PADS.map { it.label },
+            DEFAULT_PADS.map { padLabel(it.note, it.channel) },
         )
     }
 }
