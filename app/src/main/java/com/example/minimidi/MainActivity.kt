@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
@@ -20,11 +21,18 @@ class MainActivity : ComponentActivity() {
     private val prefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
     // Saved in onPause, not on every change: a slider drag fires this ~100 times a second.
     private var settings by mutableStateOf(Settings())
+    // Pads and bank are saved on every change (taps, not drags).
+    private var pads by mutableStateOf(DEFAULT_PADS)
+    private var bank by mutableIntStateOf(0)
+    private var heardNote by mutableStateOf<HeardNote?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = prefs.loadSettings()
+        pads = prefs.loadPads()
+        bank = prefs.loadBank()
         midi = MidiOut(this)
+        midi.onNote = { channel, note -> heardNote = HeardNote(channel, note) }
         engine = PadEngine(midi::send)
         val haptics = Haptics(this)
         enableEdgeToEdge()
@@ -35,6 +43,12 @@ class MainActivity : ComponentActivity() {
                     settings = settings,
                     onSettingsChange = { settings = it },
                     connected = midi.connected,
+                    inputConnected = midi.inputConnected,
+                    pads = pads,
+                    onPadsChange = { pads = it; prefs.savePads(it) },
+                    bank = bank,
+                    onBankChange = { bank = it; prefs.saveBank(it) },
+                    heardNote = heardNote,
                     engine = engine,
                     haptics = haptics,
                 )
@@ -54,7 +68,7 @@ class MainActivity : ComponentActivity() {
 
     // Leaving the foreground must never leave a note droning in the DAW.
     override fun onPause() {
-        engine.panic(DEFAULT_PADS.map { it.channel })
+        engine.panic(pads.map { it.channel })
         prefs.save(settings)
         super.onPause()
     }
