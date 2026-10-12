@@ -9,8 +9,9 @@ A fourth pass runs only on request (--repeat) and then replaces the three above 
   repeat semi-manual note repeat check against this Mac's MIDI clock. The script sends Start and clock at
          120 BPM (one every 1/48 s, deadline-paced, every tick timestamped), prints a prompt, and you hold
          REPEAT + pad 1 on the phone for about 3 s. It records note 36 ch 10 for 5 s, then sends Stop.
-         Asserts: at least 8 note_ons; every note_on after the first within 1 tick of a multiple of the
-         rate's tick count (rate read from the screen, "Repeat rate 1/16" = 6 ticks); each note_on after
+         Asserts: at least max(2, int(3*2*24/per*0.7)) note_ons; every note_on after the first at a
+         multiple of the rate's tick count, or one tick after it when that count is >= 4 (late, never
+         early; rate read from the screen, "Repeat rate 1/16" = 6 ticks); each note_on after
          the first preceded by a note_off; a final note_off after release. Prints count, mean/max
          deviation from the grid tick time (ms) and mean interval (125 ms at 1/16 @ 120 BPM).
 
@@ -268,8 +269,10 @@ def pass_repeat(port, out, rate):
         return ["no clock was sent"]
     ons = [e for e in events if e[0] == "note_on"]
     print(f"  recorded {len(ons)} note_on, {len(events) - len(ons)} note_off for note {FIRST_NOTE}; {len(ticks)} clock ticks sent")
-    if len(ons) < 8:
-        bad.append(f"expected at least 8 note_ons for note {FIRST_NOTE}, got {len(ons)}")
+    # 3 s hold at 120 BPM = 2 beats/s = 48 ticks/s; allow 30% slack for the finger landing/lifting.
+    want = max(2, int(3 * 2 * 24 / per * 0.7))
+    if len(ons) < want:
+        bad.append(f"expected at least {want} note_ons for note {FIRST_NOTE} at {rate}, got {len(ons)}")
     for kind, t, ch in events:
         if ch != CHANNEL:
             bad.append(f"{kind} on ch {ch + 1} at {t:.3f}, want ch {CHANNEL + 1}")
@@ -279,16 +282,17 @@ def pass_repeat(port, out, rate):
             bad.append(f"note_on at {ev[1]:.3f} not preceded by a note_off (overlapping or stuck)")
     if events and events[-1][0] != "note_off":
         bad.append("no final note_off after release (note stuck on)")
-    # Timing: nearest sent tick by receive time, then nearest multiple of `per`, tolerance 1 tick.
+    # Timing: nearest sent tick by receive time. Latency only makes a repeat late, never early, so the tick index must be
+    # a multiple of `per` (residue 0) or one tick after (residue 1, only when per >= 4: below that +1 is another grid line).
     by_index = dict(ticks)
     devs = []
     for k, (_, t, _) in enumerate(ons):
         if k == 0:
             continue  # the immediate hit on press, not grid-aligned
         idx = min(ticks, key=lambda x: abs(x[1] - t))[0]
-        grid = round(idx / per) * per
-        if abs(idx - grid) > 1:
-            bad.append(f"note_on #{k + 1} at tick {idx}: off the {per}-tick grid by {idx - grid} ticks")
+        grid = idx - idx % per
+        if idx % per not in ((0, 1) if per >= 4 else (0,)):
+            bad.append(f"note_on #{k + 1} at tick {idx}: off the {per}-tick grid (idx % {per} = {idx % per})")
         if grid in by_index:
             devs.append(abs(t - by_index[grid]) * 1000)
     if devs:
