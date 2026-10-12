@@ -7,7 +7,7 @@ v1 merged to `main` on 2026-10-01. It is verified on a Galaxy Z Fold5, and the e
 - [x] **Per-pad remap** (note and channel) through an explicit edit mode, with MIDI learn; `PadMap` persisted (2026-10-11).
 - [x] **Banks** A–F: shift all pads by 16 notes (2026-10-11).
 - [ ] **MPC-style A–D banks**: four independent 16-pad maps instead of one offset map. Saved format `padmap.v1` would become per-bank.
-- [ ] **Bluetooth MIDI output**: a BLE MIDI GATT server with the phone as peripheral, added beside `MidiOut`.
+- [ ] **Wireless MIDI**: undecided between Network MIDI (RTP-MIDI over Wi-Fi; likely lower latency, needs the same network) and BLE MIDI (GATT server with the phone as peripheral; works anywhere, ~10–20 ms and jitter set by the Mac's connection interval). Both sit beside `MidiOut`. Before building, feel the latency with an existing app that does both, and decide by why wireless is wanted.
 
 ## Candidate features (not yet committed)
 
@@ -15,7 +15,8 @@ Several of these need **MIDI input** (receiving from the DAW; the port and `Midi
 
 Worth adding:
 
-- [ ] **Note repeat / roll**: hold a pad to retrigger at 1/8, 1/16, 1/32 or triplets, synced to MIDI clock from the DAW, with tap tempo as a fallback.
+- [x] **Note repeat / roll** (2026-10-11): hold REPEAT + pads; 1/4..1/32T; synced to MIDI clock (e2e: 59 repeats within 2.7 ms of the Mac's grid), internal tempo + tap tempo otherwise.
+- [ ] **Note repeat latch**: double-tap REPEAT to latch.
 - [ ] **Full Level**: a quick toggle on the main screen that forces velocity 127.
 - [ ] **Velocity curves** (soft, linear, hard): could replace or sit beside sensitivity. Most useful once area velocity works.
 - [ ] **Choke groups**: one pad cuts another (closed hi-hat cuts open), with the controller sending the note-off.
@@ -32,6 +33,9 @@ Nice to have:
 Skipped: on-device sounds or a sampler, a step sequencer, and an XY pad or touch strip. These are out of scope for a pad controller.
 
 ## Known limitations
+
+- [ ] **Note repeat sends one extra note-off** per hold (e2e saw 61 offs for 60 ons). Harmless, but find where it comes from.
+- [ ] The note-repeat DAW-echo guard (100 ms after own presses, for learn) and the INT takeover after Logic stops are unit-tested only, not on hardware.
 
 - [ ] **Area velocity doesn't work on the Fold5.** Samsung reports touch contact of only about 1.6–3.3 dp, against `velocity()`'s 25 dp floor, so every hit plays at velocity 20. For now, play in Fixed mode. The full diagnosis is in `docs/notes/2026-09-30-feel-and-artemis.md`. Fix options:
   - retune the floor and full-scale range from 10 soft and 10 hard sample taps; or
