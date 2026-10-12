@@ -156,7 +156,7 @@ def pass_learn(port, backlog, pads, out):
     bad = []
     pad1 = list(map(str, pads[1]))
     try:
-        tap("Edit pads")
+        tap("EDIT")
         adb("shell", "input", "tap", *pad1)  # selects pad 1 (and plays it)
         time.sleep(0.5)
         tree = nodes()
@@ -173,7 +173,7 @@ def pass_learn(port, backlog, pads, out):
         adb("shell", "input", "tap", *pad1)
         bad += check_hit(port, backlog, 60, 1, None, "learned pad 1")
         # Restore the default mapping whatever happened above.
-        tap("Edit pads")
+        tap("EDIT")
         adb("shell", "input", "tap", *pad1)
         time.sleep(0.5)
         tap("Reset pad")
