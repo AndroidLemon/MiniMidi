@@ -152,11 +152,17 @@ def pass_bank(port, backlog, pads):
     return bad
 
 
+def fresh_pad1():
+    """Pad 1's centre as strings, re-read after the layout changed (e.g. the edit panel docked)."""
+    time.sleep(0.3)
+    return list(map(str, visible_pads()[1]))
+
+
 def pass_learn(port, backlog, pads, out):
     bad = []
-    pad1 = list(map(str, pads[1]))
     try:
         tap("EDIT")
+        pad1 = fresh_pad1()  # the edit panel shrinks the grid: the coordinates read before EDIT are stale
         adb("shell", "input", "tap", *pad1)  # selects pad 1 (and plays it)
         time.sleep(0.5)
         tree = nodes()
@@ -170,16 +176,16 @@ def pass_learn(port, backlog, pads, out):
         time.sleep(0.5)
         tap("Done editing")
         settle(port, backlog)
-        adb("shell", "input", "tap", *pad1)
+        adb("shell", "input", "tap", *map(str, pads[1]))  # edit mode closed: the grid is full size again
         bad += check_hit(port, backlog, 60, 1, None, "learned pad 1")
         # Restore the default mapping whatever happened above.
         tap("EDIT")
-        adb("shell", "input", "tap", *pad1)
+        adb("shell", "input", "tap", *fresh_pad1())
         time.sleep(0.5)
         tap("Reset pad")
         tap("Done editing")
         settle(port, backlog)
-        adb("shell", "input", "tap", *pad1)
+        adb("shell", "input", "tap", *map(str, pads[1]))
         bad += check_hit(port, backlog, FIRST_NOTE, CHANNEL, None, "reset pad 1")
     except Missing as e:
         bad.append(str(e))
