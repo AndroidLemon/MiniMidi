@@ -323,7 +323,10 @@ def main():
     repeat = "--repeat" in args
     args = [a for a in args if a != "--repeat"]
     hint = args[0] if args else ""
-    adb("shell", "svc", "usb", "setFunctions", "midi")
+    try:  # USB MIDI mode; fails harmlessly with no cable (e.g. testing over Network MIDI)
+        adb("shell", "svc", "usb", "setFunctions", "midi")
+    except subprocess.CalledProcessError:
+        print("  (couldn't set USB MIDI mode: no cable? continuing)", file=sys.stderr)
     wait_for_port(hint)
     end = time.monotonic() + 5  # let the app notice the new USB mode
     while time.monotonic() < end and find("MIDI connected", nodes()) is None:
