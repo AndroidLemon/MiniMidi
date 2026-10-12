@@ -258,4 +258,42 @@ class NoteRepeatTest {
         }
     }
 
+
+    @Test fun intTakeoverWaitsLongerThanDisplayAndKeepsTick() {
+        val spawned = mutableListOf<Thread>()
+        val n = NoteRepeat(PadEngine { }, { nanos }, { it.run() }, { r -> Thread(r).also { spawned += it } })
+        repeat(100) { n.externalClock(); nanos += tickNs }
+        n.hold(true)
+        nanos += 400_000_000L // display says INT after 250 ms, but INT only takes over after 500 ms
+        n.refresh()
+        assertEquals(ClockMode.INT, n.source)
+        assertEquals(0, spawned.size)
+        nanos += 150_000_000L
+        n.refresh()
+        assertEquals(1, spawned.size)
+        assertEquals(100L, n.position) // continues counting, phase kept
+    }
+
+    @Test fun holdWithoutExternalClockStartsIntFromZero() {
+        val spawned = mutableListOf<Thread>()
+        val n = NoteRepeat(PadEngine { }, { nanos }, { it.run() }, { r -> Thread(r).also { spawned += it } })
+        repeat(10) { n.externalClock(); nanos += tickNs }
+        nanos += 2_000_000_000L
+        n.hold(true)
+        assertEquals(1, spawned.size)
+        assertEquals(0L, n.position)
+    }
+
+    @Test fun externalStartStopsRunningInt() {
+        val spawned = mutableListOf<Thread>()
+        val n = NoteRepeat(PadEngine { }, { nanos }, { it.run() }, { r -> Thread(r).also { it.isDaemon = true; spawned += it } })
+        try {
+            n.hold(true) // no external clock: INT thread (not yet started)
+            n.externalStart()
+            spawned[0].start()
+            spawned[0].join(1000)
+            assertFalse("stale INT thread still running", spawned[0].isAlive)
+            assertEquals(0L, n.position)
+        } finally { n.stop() }
+    }
 }

@@ -47,7 +47,8 @@ class ClockSource(private val nowNanos: () -> Long) {
         if (times.size > 25) times.removeFirst()
     }
 
-    fun external(): Boolean = times.isNotEmpty() && nowNanos() - times.last() <= 250_000_000L
+    /** Ticks are arriving: the last one is at most [withinNanos] old (default 250 ms, the display threshold). */
+    fun external(withinNanos: Long = 250_000_000L): Boolean = times.isNotEmpty() && nowNanos() - times.last() <= withinNanos
 
     fun externalBpm(): Double? {
         if (times.size < 2 || !external()) return null
@@ -62,6 +63,9 @@ class ClockSource(private val nowNanos: () -> Long) {
  */
 fun missedTicks(now: Long, deadline: Long, period: Long): Long =
     if (now - deadline > period) (now - deadline) / period + 1 else 0
+
+/** INT takes over from a silent external clock only after this long (the EXT/INT display flips earlier, at 250 ms). */
+const val INT_TAKEOVER_NANOS = 500_000_000L
 
 enum class ClockMode { EXT, INT }
 
@@ -108,7 +112,7 @@ class NoteRepeat(
         if (down) {
             engine.heldPointers().forEach { pressTicks[it] = tick }
             // INT counts from 0 at the REPEAT press; an already-running EXT clock keeps its own count.
-            if (!clock.external()) startIntFromZero()
+            if (!clock.external(INT_TAKEOVER_NANOS)) startIntFromZero()
         } else stopInt()
         refreshLocked()
     }
@@ -123,10 +127,10 @@ class NoteRepeat(
         advance()
         throttledRefresh()
     }
-    fun externalStart() = synchronized(lock) { setTick(0) }
+    fun externalStart() = synchronized(lock) { stopInt(); setTick(0) }
     fun externalContinue() {} // ticks keep counting from where Start/SPP/Stop left them
     fun externalStop() = refresh()
-    fun externalSongPosition(sixteenths: Int) = synchronized(lock) { setTick(sixteenths * 6L) }
+    fun externalSongPosition(sixteenths: Int) = synchronized(lock) { stopInt(); setTick(sixteenths * 6L) }
 
     // Moving the clock position backwards must not leave held pads with press ticks in the future (fires() would stay false).
     private fun setTick(t: Long) {
@@ -136,8 +140,9 @@ class NoteRepeat(
 
     /** Recomputes [source] and [bpm] now. Cheap; a UI may poll it so a vanished external clock shows as INT. */
     fun refresh() = synchronized(lock) {
-        // REPEAT held, external clock gone (Logic stopped) and INT idle: carry on at the phone's tempo.
-        if (held && intThread == null && !clock.external()) startIntFromZero()
+        // REPEAT held, external clock gone (Logic stopped) and INT idle: carry on at the phone's tempo, continuing the
+        // tick count so the grid phase is kept if EXT resumes. (The display flips to INT sooner, after 250 ms.)
+        if (held && intThread == null && !clock.external(INT_TAKEOVER_NANOS)) startInt()
         refreshLocked()
     }
 
