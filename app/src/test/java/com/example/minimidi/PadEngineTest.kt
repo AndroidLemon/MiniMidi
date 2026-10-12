@@ -74,4 +74,25 @@ class PadEngineTest {
         engine.panic(listOf(10, 10))
         assertEquals(listOf(listOf(0x89, 0x24, 0), listOf(0xB9, 123, 0)), sent)
     }
+
+    @Test fun retriggerSendsOffThenOnAtStoredVelocity() {
+        engine.press(1, kick, 77); sent.clear()
+        engine.retrigger(1)
+        assertEquals(listOf(listOf(0x89, 0x24, 0), listOf(0x99, 0x24, 77)), sent)
+        engine.release(1)
+        assertEquals(listOf(0x89, 0x24, 0), sent.last()) // still held after retrigger
+    }
+
+    @Test fun retriggerUnknownPointerSendsNothing() {
+        engine.retrigger(9)
+        assertEquals(emptyList<List<Int>>(), sent)
+    }
+
+    @Test fun heldPointersAndPressHook() {
+        val pressed = mutableListOf<Int>()
+        engine.onPress = { pressed += it }
+        engine.press(3, kick, 100); engine.press(5, snare, 100); engine.release(3)
+        assertEquals(listOf(5), engine.heldPointers())
+        assertEquals(listOf(3, 5), pressed)
+    }
 }

@@ -1,5 +1,14 @@
 package com.example.minimidi
 
+import android.os.Handler
+import android.os.Looper
+import android.os.Process
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import java.util.concurrent.locks.LockSupport
+
 /** Repeat rates, in 24-per-quarter MIDI clock ticks per repeat. */
 enum class Rate(val label: String, val ticks: Int) {
     Quarter("1/4", 24), Eighth("1/8", 12), EighthT("1/8T", 8), Sixteenth("1/16", 6),
@@ -32,7 +41,9 @@ class ClockSource(private val nowNanos: () -> Long) {
     private val times = ArrayDeque<Long>() // last 25 tick times = 24 intervals
 
     fun tick() {
-        times.addLast(nowNanos())
+        val t = nowNanos()
+        if (times.isNotEmpty() && t - times.last() > 250_000_000L) times.clear() // transport restarted: don't average in the pause
+        times.addLast(t)
         if (times.size > 25) times.removeFirst()
     }
 
@@ -42,5 +53,119 @@ class ClockSource(private val nowNanos: () -> Long) {
         if (times.size < 2 || !external()) return null
         val meanSeconds = (times.last() - times.first()) / 1e9 / (times.size - 1)
         return 60.0 / (24 * meanSeconds)
+    }
+}
+
+enum class ClockMode { EXT, INT }
+
+/**
+ * Retriggers held pads on the tick grid (24 ticks per quarter) while REPEAT is held.
+ * Threads: the main thread calls hold/stop/refresh, the MIDI thread calls external*(), the INT thread calls advance().
+ * One lock ([lock]) guards tick, pressTicks, held, clock and the INT thread handle; it is always taken before the PadEngine's own lock
+ * (advance -> engine.retrigger), and PadEngine.onPress runs before the engine lock, so the order is never reversed.
+ * [source] and [bpm] are Compose state for the UI: written on the main thread via [post], at most every 250 ms from the tick path
+ * (plus on hold/stop/external stop and [refresh], which a UI may poll while idle).
+ */
+class NoteRepeat(
+    private val engine: PadEngine,
+    private val nowNanos: () -> Long = System::nanoTime,
+    private val post: (Runnable) -> Unit = { Handler(Looper.getMainLooper()).post(it) },
+) {
+    @Volatile var rate = Rate.Sixteenth
+    @Volatile var internalBpm = 120
+
+    var source by mutableStateOf(ClockMode.INT)
+        private set
+    var bpm by mutableIntStateOf(120)
+        private set
+
+    private val lock = Any()
+    private val clock = ClockSource(nowNanos)
+    private val pressTicks = HashMap<Int, Long>()
+    private var held = false
+    private var tick = 0L
+    @Volatile private var intGen = 0 // bumped to stop the running INT thread; 0..: thread g runs only while intGen == g
+    private var intThread: Thread? = null
+    private var lastUiNanos = 0L
+
+    init { engine.onPress = ::onPress }
+
+    fun onPress(pointerId: Int) { synchronized(lock) { pressTicks[pointerId] = tick } }
+
+    fun hold(down: Boolean) = synchronized(lock) {
+        held = down
+        if (down) {
+            engine.heldPointers().forEach { pressTicks[it] = tick }
+            // INT counts from 0 at the REPEAT press; an already-running EXT clock keeps its own count.
+            if (!clock.external()) { tick = 0; engine.heldPointers().forEach { pressTicks[it] = 0 }; startInt() }
+        } else stopInt()
+        refreshLocked()
+    }
+
+    /** App leaving the foreground: stop INT, clear held. */
+    fun stop() = synchronized(lock) { held = false; stopInt(); refreshLocked() }
+
+    // External clock: all on the MIDI thread.
+    fun externalClock() = synchronized(lock) {
+        stopInt() // EXT wins over INT as soon as it arrives
+        clock.tick()
+        advance()
+        throttledRefresh()
+    }
+    fun externalStart() = synchronized(lock) { tick = 0 }
+    fun externalContinue() {} // ticks keep counting from where Start/SPP/Stop left them
+    fun externalStop() = refresh()
+    fun externalSongPosition(sixteenths: Int) = synchronized(lock) { tick = sixteenths * 6L }
+
+    /** Recomputes [source] and [bpm] now. Cheap; a UI may poll it so a vanished external clock shows as INT. */
+    fun refresh() = synchronized(lock) { refreshLocked() }
+
+    // Callers hold [lock]. Processes the clock position `tick`, then moves to the next one.
+    private fun advance() {
+        if (held) for (id in engine.heldPointers()) {
+            if (fires(tick, pressTicks[id] ?: tick, rate.ticks)) engine.retrigger(id)
+        }
+        tick++
+    }
+
+    private fun throttledRefresh() {
+        val n = nowNanos()
+        if (n - lastUiNanos >= 250_000_000L) refreshLocked()
+    }
+
+    private fun refreshLocked() {
+        lastUiNanos = nowNanos()
+        val ext = clock.external()
+        val s = if (ext) ClockMode.EXT else ClockMode.INT
+        val b = (if (ext) clock.externalBpm()?.let { Math.round(it).toInt() } else null) ?: internalBpm
+        post(Runnable { source = s; bpm = b })
+    }
+
+    private fun stopInt() {
+        intGen++
+        intThread?.let { LockSupport.unpark(it) }
+        intThread = null
+    }
+
+    private fun startInt() {
+        stopInt()
+        val g = intGen
+        intThread = Thread({
+            runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO) }
+            var deadline = System.nanoTime()
+            while (true) {
+                while (true) { // park until the deadline, bailing out as soon as we're stopped
+                    val rem = deadline - System.nanoTime()
+                    if (rem <= 0 || intGen != g) break
+                    LockSupport.parkNanos(rem)
+                }
+                synchronized(lock) {
+                    if (intGen != g) return@Thread
+                    advance()
+                    throttledRefresh()
+                }
+                deadline += (60_000_000_000.0 / (internalBpm.coerceIn(30, 300) * 24)).toLong()
+            }
+        }, "note-repeat-int").apply { isDaemon = true; start() }
     }
 }

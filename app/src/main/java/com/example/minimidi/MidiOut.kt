@@ -14,6 +14,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.io.IOException
 
+/** MIDI realtime/clock events, delivered on the MIDI receive thread. */
+interface ClockListener {
+    fun onClock()
+    fun onStart()
+    fun onContinue()
+    fun onStop()
+    fun onSongPosition(sixteenths: Int)
+}
+
 /**
  * Carries MIDI to and from the computer over USB. With the phone's USB mode set to "MIDI", the host appears here
  * as a TYPE_USB device whose *input* port is what we write to and whose *output* port is what we read from
@@ -30,6 +39,9 @@ class MidiOut(context: Context) {
 
     /** Note-ons from the computer, delivered on the main thread: (channel 1..16, note). */
     var onNote: ((channel: Int, note: Int) -> Unit)? = null
+
+    /** Realtime clock from the computer, called on the MIDI thread (not posted to main). */
+    @Volatile var clock: ClockListener? = null
 
     private val manager = context.getSystemService(MidiManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
@@ -95,9 +107,16 @@ class MidiOut(context: Context) {
     private fun openInput(d: MidiDevice) {
         val op = d.openOutputPort(0) ?: return
         // The parser lives on the MIDI thread only; just the note posts to main.
-        val parser = MidiParser { ch, note, _ ->
-            handler.post { if (outPort === op) onNote?.invoke(ch, note) } // drops notes posted before close()
-        }
+        val parser = MidiParser(
+            onNoteOn = { ch, note, _ ->
+                handler.post { if (outPort === op) onNote?.invoke(ch, note) } // drops notes posted before close()
+            },
+            onClock = { clock?.onClock() },
+            onStart = { clock?.onStart() },
+            onContinue = { clock?.onContinue() },
+            onStop = { clock?.onStop() },
+            onSongPosition = { clock?.onSongPosition(it) },
+        )
         val r = object : MidiReceiver() {
             override fun onSend(msg: ByteArray, offset: Int, count: Int, timestamp: Long) = parser.feed(msg, offset, count)
         }

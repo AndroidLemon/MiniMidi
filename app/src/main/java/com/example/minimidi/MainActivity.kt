@@ -21,6 +21,7 @@ private const val ECHO_WINDOW_MS = 100L
 class MainActivity : ComponentActivity() {
     private lateinit var midi: MidiOut
     private lateinit var engine: PadEngine
+    private lateinit var noteRepeat: NoteRepeat
     private val prefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
     // Saved in onPause, not on every change: a slider drag fires this ~100 times a second.
     private var settings by mutableStateOf(Settings())
@@ -43,6 +44,14 @@ class MainActivity : ComponentActivity() {
             if (learnArmed && SystemClock.uptimeMillis() - lastSentAt > ECHO_WINDOW_MS) heardNote = HeardNote(channel, note)
         }
         engine = PadEngine { bytes -> lastSentAt = SystemClock.uptimeMillis(); midi.send(bytes) }
+        noteRepeat = NoteRepeat(engine) // hooks engine.onPress itself
+        midi.clock = object : ClockListener {
+            override fun onClock() = noteRepeat.externalClock()
+            override fun onStart() = noteRepeat.externalStart()
+            override fun onContinue() = noteRepeat.externalContinue()
+            override fun onStop() = noteRepeat.externalStop()
+            override fun onSongPosition(sixteenths: Int) = noteRepeat.externalSongPosition(sixteenths)
+        }
         val haptics = Haptics(this)
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -78,6 +87,7 @@ class MainActivity : ComponentActivity() {
 
     // Leaving the foreground must never leave a note droning in the DAW.
     override fun onPause() {
+        noteRepeat.stop()
         engine.panic(pads.map { it.channel })
         prefs.save(settings)
         super.onPause()

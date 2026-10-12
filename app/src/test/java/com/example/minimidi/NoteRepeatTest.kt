@@ -120,4 +120,84 @@ class NoteRepeatTest {
         n -= tickNs
         assertEquals(120.0, cs.externalBpm()!!, 0.01)
     }
+
+    @Test fun clockSourceForgetsPauseAfterTransportRestart() {
+        var n = 1_000_000_000L
+        val cs = ClockSource { n }
+        repeat(5) { cs.tick(); n += tickNs }
+        n += 10_000_000_000L // transport stopped for 10 s
+        repeat(5) { cs.tick(); n += tickNs }
+        n -= tickNs
+        assertEquals(120.0, cs.externalBpm()!!, 0.01)
+    }
+
+    // --- NoteRepeat engine (no threads: external clock only) ---
+    private val sent = mutableListOf<List<Int>>()
+    private var nanos = 1_000_000_000L
+    private val engine = PadEngine { sent += it.u() }
+    private val nr = NoteRepeat(engine, { nanos }, { it.run() })
+    private val kick = DEFAULT_PADS[0]
+
+    /** Runs [n] clocks; returns the tick offsets (0-based) at which a retrigger (note-on) was sent. */
+    private fun clocks(n: Int): List<Int> = (0 until n).filter { i ->
+        val before = sent.size; nr.externalClock(); nanos += tickNs
+        sent.size > before
+    }
+
+    @Test fun repeatsOnGridAfterPressAtTick5() {
+        nr.hold(true)
+        clocks(5)
+        engine.press(1, kick, 90); sent.clear()
+        // clocks at ticks 5..24: grid lines 6 (skipped, <3 after press), 12, 18, 24
+        assertEquals(listOf(7, 13, 19), clocks(20))
+        assertEquals(listOf(0x89, 0x24, 0), sent[0]); assertEquals(listOf(0x99, 0x24, 90), sent[1])
+    }
+
+    @Test fun repeatPressedWhilePadHeldFiresOnNextGridLineOnly() {
+        clocks(2)
+        engine.press(1, kick, 100); sent.clear()
+        clocks(2)
+        nr.hold(true)
+        assertEquals(emptyList<List<Int>>(), sent) // no immediate note
+        // ticks 4..12: grid 6 is only 2 after the hold, so first repeat is 12
+        assertEquals(listOf(8), clocks(9))
+    }
+
+    @Test fun notHeldNoRetriggers() {
+        engine.press(1, kick, 100); sent.clear()
+        assertEquals(emptyList<Int>(), clocks(30))
+    }
+
+    @Test fun releasingRepeatStops() {
+        nr.hold(true); engine.press(1, kick, 100)
+        nr.hold(false); sent.clear()
+        assertEquals(emptyList<Int>(), clocks(30))
+    }
+
+    @Test fun rateChangeApplies() {
+        nr.rate = Rate.Quarter
+        nr.hold(true); engine.press(1, kick, 100); sent.clear()
+        assertEquals(listOf(24), clocks(30)) // tick 24 is the only grid line in 0..29 that is >=12 after the press at 0
+    }
+
+    @Test fun startResetsTickAndSongPositionSetsIt() {
+        nr.hold(true); clocks(4); nr.externalStart()
+        engine.press(1, kick, 100); sent.clear()
+        assertEquals(listOf(6), clocks(8)) // tick 6 fires: 6-0 >= 3
+        nr.externalSongPosition(3) // tick 18
+        assertEquals(listOf(0, 6), clocks(8)) // ticks 18..25: 18 and 24
+    }
+
+    @Test fun sourceAndBpmFollowExternalClock() {
+        assertEquals(ClockMode.INT, nr.source)
+        clocks(30)
+        assertEquals(ClockMode.EXT, nr.source)
+        assertEquals(120, nr.bpm)
+    }
+
+    @Test fun internalTempoShownWhenNoExternalClock() {
+        nr.internalBpm = 94; nr.refresh()
+        assertEquals(ClockMode.INT, nr.source)
+        assertEquals(94, nr.bpm)
+    }
 }
