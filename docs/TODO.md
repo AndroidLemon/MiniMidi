@@ -7,7 +7,7 @@ v1 merged to `main` on 2026-10-01. It is verified on a Galaxy Z Fold5, and the e
 - [x] **Per-pad remap** (note and channel) through an explicit edit mode, with MIDI learn; `PadMap` persisted (2026-10-11).
 - [x] **Banks** A–F: shift all pads by 16 notes (2026-10-11).
 - [ ] **MPC-style A–D banks**: four independent 16-pad maps instead of one offset map. Saved format `padmap.v1` would become per-bank.
-- [ ] **Wireless MIDI**: undecided between Network MIDI (RTP-MIDI over Wi-Fi; likely lower latency, needs the same network) and BLE MIDI (GATT server with the phone as peripheral; works anywhere, ~10–20 ms and jitter set by the Mac's connection interval). Both sit beside `MidiOut`. Before building, feel the latency with an existing app that does both, and decide by why wireless is wanted.
+- [ ] **Wireless MIDI** (Network MIDI spike measured 2026-10-12, see `docs/notes/2026-10-12-network-midi-spike.md`: about 15 ms mean and up to 75 ms worst over the round trip, against USB's 2 ms; leaning towards a BLE spike next): undecided between Network MIDI (RTP-MIDI over Wi-Fi; likely lower latency, needs the same network) and BLE MIDI (GATT server with the phone as peripheral; works anywhere, ~10–20 ms and jitter set by the Mac's connection interval). Both sit beside `MidiOut`. Before building, feel the latency with an existing app that does both, and decide by why wireless is wanted.
 
 ## Candidate features (not yet committed)
 
@@ -21,6 +21,11 @@ Worth adding:
 - [ ] **Velocity curves** (soft, linear, hard): could replace or sit beside sensitivity. Most useful once area velocity works.
 - [ ] **Choke groups**: one pad cuts another (closed hi-hat cuts open), with the controller sending the note-off.
 - [ ] **Aftertouch / pressure** from contact size while held. Experimental, since Fold5 contact data is coarse.
+
+- [ ] **Pitch bend / modulation by sliding** on a held pad (idea, 2026-10-12): slide up/down to bend, or send CC1 (mod wheel) instead; springs back to centre on release. Open questions before designing:
+  - Pitch bend is per **channel**, so on channel 10 one slide bends the whole kit. Per-pad bends need each pad on its own channel (remap can already do that) or MPE.
+  - It breaks v1's "sliding does nothing" rule: needs a dead zone so ordinary hits never bend, and a choice of whether a slide can still leave the pad.
+  - Pairs well with note repeat (pitched rolls).
 
 Nice to have:
 
